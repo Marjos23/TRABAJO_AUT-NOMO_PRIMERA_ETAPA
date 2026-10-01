@@ -185,6 +185,18 @@ La API queda disponible en `http://localhost:3000`.
 > En desarrollo la entidad se crea automáticamente porque TypeORM corre con
 > `synchronize: true`. Para producción deben usarse migraciones.
 
+### Pruebas automatizadas
+
+```bash
+npm test        # pruebas unitarias
+npm run build   # verificacion de compilacion
+```
+
+Las pruebas unitarias cubren la validacion de los DTOs (payload invalido, isbn
+corto, anio no numerico, copias negativas, propiedades no permitidas) y el
+comportamiento del servicio (CRUD y centralized de la excepcion 404). No
+requieren base de datos porque el repositorio se simula con un mock.
+
 ## 9. Pruebas con curl
 
 Crear un libro:
