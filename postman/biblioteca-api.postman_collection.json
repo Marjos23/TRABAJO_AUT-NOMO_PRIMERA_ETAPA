@@ -1,0 +1,336 @@
+{
+  "info": {
+    "name": "Biblioteca API",
+    "description": "Coleccion de pruebas para la API REST de biblioteca (NestJS + TypeORM + PostgreSQL). Importar con: Import > Link > JSON > seleccionar este archivo.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "bookId", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "1. Crear libro",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Clean Code\",\n  \"author\": \"Robert C. Martin\",\n  \"isbn\": \"9780132350884\",\n  \"category\": \"Tecnología\",\n  \"year\": 2008,\n  \"copies\": 5\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/books", "host": ["{{baseUrl}}"], "path": ["books"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 201', () => pm.response.to.have.status(201));",
+              "pm.test('devuelve id', () => pm.expect(pm.response.json().id).to.be.a('number'));",
+              "",
+              "const creado = pm.response.json();",
+              "pm.collectionVariables.set('bookId', creado.id);",
+              "pm.test('guarda el isbn para el test de 409', () => {",
+              "  pm.collectionVariables.set('isbnCreado', creado.isbn);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Crear segundo libro",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"El principito\",\n  \"author\": \"Antoine de Saint-Exupéry\",\n  \"isbn\": \"9780156012195\",\n  \"category\": \"Infantil\",\n  \"year\": 1943,\n  \"copies\": 3\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/books", "host": ["{{baseUrl}}"], "path": ["books"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 201', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('isbnSegundo', pm.response.json().isbn);",
+              "pm.collectionVariables.set('idSegundo', pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Listar todos los libros",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{baseUrl}}/books", "host": ["{{baseUrl}}"], "path": ["books"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 200', () => pm.response.to.have.status(200));",
+              "pm.test('devuelve un arreglo', () => pm.expect(pm.response.json()).to.be.an('array'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Obtener libro por ID",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/books/{{bookId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["books", "{{bookId}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 200', () => pm.response.to.have.status(200));",
+              "pm.test('el id coincide', () => {",
+              "  pm.expect(pm.response.json().id).to.eql(+pm.collectionVariables.get('bookId'));",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Actualizar parcialmente (PATCH)",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"copies\": 10\n}" },
+        "url": {
+          "raw": "{{baseUrl}}/books/{{bookId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["books", "{{bookId}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 200', () => pm.response.to.have.status(200));",
+              "pm.test('copies actualizado a 10', () => pm.expect(pm.response.json().copies).to.eql(10));",
+              "pm.test('el titulo no se pierde', () => pm.expect(pm.response.json().title).to.be.a('string'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ERROR 400 - propiedad no permitida",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"X\",\n  \"author\": \"Y\",\n  \"isbn\": \"9780000000000\",\n  \"category\": \"Z\",\n  \"year\": 2020,\n  \"copies\": 1,\n  \"campoInvalido\": true\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/books", "host": ["{{baseUrl}}"], "path": ["books"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 400', () => pm.response.to.have.status(400));",
+              "pm.test('señala el campo prohibido', () => pm.expect(pm.response.text()).to.include('campoInvalido'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ERROR 400 - isbn demasiado corto",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"X\",\n  \"author\": \"Y\",\n  \"isbn\": \"123\",\n  \"category\": \"Z\",\n  \"year\": 2020,\n  \"copies\": 1\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/books", "host": ["{{baseUrl}}"], "path": ["books"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('responde 400', () => pm.response.to.have.status(400));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ERROR 400 - copias negativas",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"X\",\n  \"author\": \"Y\",\n  \"isbn\": \"9780000000001\",\n  \"category\": \"Z\",\n  \"year\": 2020,\n  \"copies\": -5\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/books", "host": ["{{baseUrl}}"], "path": ["books"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('responde 400', () => pm.response.to.have.status(400));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ERROR 400 - id no numerico",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/books/abc",
+          "host": ["{{baseUrl}}"],
+          "path": ["books", "abc"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('responde 400', () => pm.response.to.have.status(400));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ERROR 404 - libro inexistente",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/books/9999",
+          "host": ["{{baseUrl}}"],
+          "path": ["books", "9999"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 404', () => pm.response.to.have.status(404));",
+              "pm.test('mensaje en español', () => pm.expect(pm.response.json().message).to.include('No existe un libro'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ERROR 409 - ISBN duplicado en POST",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"title\": \"Clean Code\",\n  \"author\": \"Impostor\",\n  \"isbn\": \"9780132350884\",\n  \"category\": \"Fraude\",\n  \"year\": 2008,\n  \"copies\": 1\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/books", "host": ["{{baseUrl}}"], "path": ["books"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 409', () => pm.response.to.have.status(409));",
+              "pm.test('error Conflict', () => pm.expect(pm.response.json().error).to.eql('Conflict'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ERROR 409 - ISBN duplicado en PATCH",
+      "request": {
+        "method": "PATCH",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"isbn\": \"9780156012195\"\n}" },
+        "url": {
+          "raw": "{{baseUrl}}/books/{{bookId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["books", "{{bookId}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('responde 409', () => pm.response.to.have.status(409));",
+              "pm.test('no devuelve 500', () => pm.expect(pm.response.json().statusCode).to.not.eql(500));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Eliminar libro (204)",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/books/{{idSegundo}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["books", "{{idSegundo}}"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('responde 204', () => pm.response.to.have.status(204));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "ERROR 404 - eliminar inexistente",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{baseUrl}}/books/9999",
+          "host": ["{{baseUrl}}"],
+          "path": ["books", "9999"]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('responde 404', () => pm.response.to.have.status(404));"]
+          }
+        }
+      ]
+    }
+  ]
+}

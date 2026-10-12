@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Entrega Segunda Etapa - Biblioteca API</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #1a1a1a; }
+  h1 { font-size: 18pt; color: #1f3864; }
+  h2 { font-size: 14pt; color: #1f3864; border-bottom: 1px solid #999; padding-bottom: 3px; }
+  h3 { font-size: 12pt; color: #2f5496; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { border: 1px solid #888; padding: 5px; text-align: left; vertical-align: top; }
+  th { background: #d9e2f3; }
+  code, pre { font-family: "Courier New", monospace; font-size: 9.5pt; }
+  pre { background: #f4f4f4; border: 1px solid #ccc; padding: 6px; }
+  .small { font-size: 9.5pt; color: #555; }
+  .ok { color: #1e7b1e; font-weight: bold; }
+  .bad { color: #b00000; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>Trabajo Autónomo — Segunda Etapa</h1>
+<p><strong>Asignatura:</strong> Desarrollo Backend Web con NestJS<br>
+<strong>Docente:</strong> Edgardo Panchana Flores<br>
+<strong>Nivel:</strong> 7 — Semana 7<br>
+<strong>Tema:</strong> Modelo relacional y autenticación<br>
+<strong>Proyecto:</strong> API REST de gestión de biblioteca (NestJS + PostgreSQL + TypeORM)</p>
+
+<h2>Integrantes</h2>
+<table>
+  <tr><th>#</th><th>Nombres y apellidos</th><th>Participación verificable</th></tr>
+  <tr><td>1</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+  <tr><td>2</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+  <tr><td>3</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+  <tr><td>4</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+</table>
+
+<h2>1. Continuidad con la Etapa 1</h2>
+<p>Se conserva y corrige la API de la Etapa 1. El recurso principal <code>Book</code>
+mantiene sus campos, DTOs y códigos de respuesta. Los cambios documentados son:</p>
+<ul>
+  <li><code>GET /books</code> ahora es paginado, filtrable y ordenable y devuelve <code>{ data, meta }</code>.</li>
+  <li>Los endpoints de escritura de libros quedan protegidos con JWT.</li>
+</ul>
+<p>No se reinició ni sustituyó el trabajo de la etapa anterior.</p>
+
+<h2>2. Modelo relacional</h2>
+<p>Además de <code>Book</code> y de <code>User</code>, se agregaron dos entidades de
+dominio: <code>Loan</code> (préstamo) y <code>Fine</code> (multa).</p>
+
+<h3>Diagrama relacional actualizado</h3>
+<pre>
++------------------+          +-------------------+          +------------------+
+|      users       |          |       loans       |          |      books       |
++------------------+          +-------------------+          +------------------+
+| id       PK      |1        N| id       PK       |N        1| id       PK      |
+| name             |----------| user_id  FK       |----------| title            |
+| email    UQ      |          | book_id  FK       |          | author           |
+| password (hash)  |          | loan_date         |          | isbn     UQ      |
+| role             |          | due_date          |          | category         |
+| created_at       |          | return_date (null)|          | year             |
+| updated_at       |          | status            |          | copies           |
++------------------+          | created_at        |          +------------------+
+                              | updated_at        |
+                              +-------------------+
+                                       |1
+                                       |
+                                       |N
+                              +-------------------+
+                              |       fines       |
+                              +-------------------+
+                              | id       PK       |
+                              | loan_id  FK       |
+                              | amount   numeric  |
+                              | reason            |
+                              | paid              |
+                              | created_at        |
+                              +-------------------+
+</pre>
+
+<h3>Entidades y campos</h3>
+<table>
+  <tr><th>Entidad</th><th>Tabla</th><th>Campos relevantes</th></tr>
+  <tr><td>Book</td><td>books</td><td>id, title, author, isbn (único), category, year, copies</td></tr>
+  <tr><td>User</td><td>users</td><td>id, name, email (único), password (hash, nunca se devuelve), role, createdAt, updatedAt</td></tr>
+  <tr><td>Loan</td><td>loans</td><td>id, book_id (FK), user_id (FK), loanDate, dueDate, returnDate, status</td></tr>
+  <tr><td>Fine</td><td>fines</td><td>id, loan_id (FK), amount, reason, paid, createdAt</td></tr>
+</table>
+
+<h3>Relaciones y reglas de borrado</h3>
+<table>
+  <tr><th>Relación</th><th>Tipo</th><th>Regla de borrado</th><th>Justificación</th></tr>
+  <tr><td>User → Loan</td><td>OneToMany / ManyToOne</td><td>ON DELETE CASCADE</td><td>Al eliminar el usuario sus préstamos dejan de existir.</td></tr>
+  <tr><td>Book → Loan</td><td>OneToMany / ManyToOne</td><td>ON DELETE RESTRICT</td><td>No se borra un libro con historial de préstamos; la API responde 409.</td></tr>
+  <tr><td>Loan → Fine</td><td>OneToMany / ManyToOne</td><td>ON DELETE CASCADE</td><td>La multa no existe sin el préstamo que la origina.</td></tr>
+</table>
+<p>Los datos relacionados no se duplican: <code>loans</code> guarda <code>book_id</code>
+y <code>user_id</code> (no el título ni el correo) y <code>fines</code> guarda
+<code>loan_id</code>.</p>
+
+<h2>3. Migraciones y configuración</h2>
+<p>El esquema se crea con una migración versionada
+(<code>1791774691127-InitialSchema.ts</code>) y <code>synchronize</code> está fijo en
+<code>false</code>. La configuración se lee desde variables de entorno; solo se
+publica <code>.env.example</code> (sin secretos).</p>
+<pre>npm install
+cp .env.example .env      # completar credenciales
+npm run migration:run     # aplica el esquema versionado
+npm run start:dev</pre>
+<p>Variables: PORT, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME,
+DB_SYNCHRONIZE=0, JWT_SECRET, JWT_EXPIRES_IN.</p>
+
+<h2>4. Endpoints protegidos (JWT)</h2>
+<p>Se protegen todos los endpoints de escritura más las consultas de usuarios. Se
+demuestra la diferencia entre una petición sin token y una autenticada.</p>
+<table>
+  <tr><th>Método</th><th>Ruta</th><th>Sin token</th><th>Con token</th></tr>
+  <tr><td>POST</td><td>/books</td><td class="bad">401</td><td class="ok">201</td></tr>
+  <tr><td>PATCH</td><td>/books/:id</td><td class="bad">401</td><td class="ok">200</td></tr>
+  <tr><td>DELETE</td><td>/books/:id</td><td class="bad">401</td><td class="ok">204 / 409</td></tr>
+  <tr><td>POST</td><td>/loans</td><td class="bad">401</td><td class="ok">201</td></tr>
+  <tr><td>POST</td><td>/loans/:id/return</td><td class="bad">401</td><td class="ok">200</td></tr>
+  <tr><td>PATCH/DELETE</td><td>/loans/:id</td><td class="bad">401</td><td class="ok">200 / 204</td></tr>
+  <tr><td>POST</td><td>/fines</td><td class="bad">401</td><td class="ok">201</td></tr>
+  <tr><td>PATCH/DELETE</td><td>/fines/:id</td><td class="bad">401</td><td class="ok">200 / 204</td></tr>
+  <tr><td>GET/POST</td><td>/users, /users/:id</td><td class="bad">401</td><td class="ok">200 / 201</td></tr>
+  <tr><td>GET</td><td>/users/:id/loans</td><td class="bad">401</td><td class="ok">200</td></tr>
+</table>
+
+<h2>5. Credenciales de prueba (no sensibles)</h2>
+<table>
+  <tr><th>Email</th><th>Contraseña</th><th>Rol</th></tr>
+  <tr><td>ana@biblioteca.com</td><td>Secreta123</td><td>reader</td></tr>
+</table>
+<p class="small">La contraseña se almacena cifrada con bcrypt; la columna está marcada
+como <code>select: false</code> y nunca se devuelve en las respuestas.</p>
+
+<h2>6. Evidencias de ejecución</h2>
+
+<h3>6.1 Registro seguro</h3>
+<pre>POST /auth/register
+{ "name": "Ana Librera", "email": "ana@biblioteca.com", "password": "Secreta123" }
+
+201 Created
+{ "id": 1, "name": "Ana Librera", "email": "ana@biblioteca.com", "role": "reader" }
+(sin campo "password")</pre>
+
+<h3>6.2 Login y emisión de JWT</h3>
+<pre>POST /auth/login
+{ "email": "ana@biblioteca.com", "password": "Secreta123" }
+
+200 OK
+{ "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...", "tokenType": "Bearer",
+  "expiresIn": "1h", "user": { "id": 1, "name": "Ana Librera", "role": "reader" } }</pre>
+<pre>POST /auth/login con contraseña incorrecta -> 401 Unauthorized</pre>
+
+<h3>6.3 Petición sin token vs autenticada</h3>
+<pre>POST /books  (sin Authorization)
+401 Unauthorized
+{ "message": "Unauthorized", "statusCode": 401 }
+
+POST /books  (Authorization: Bearer &lt;token&gt;)
+201 Created
+{ "id": 1, "title": "Clean Code", "author": "Robert C. Martin",
+  "isbn": "9780132350884", "category": "Tecnologia", "year": 2008, "copies": 5 }</pre>
+
+<h3>6.4 Relación persistente (préstamo que asocia libro y usuario)</h3>
+<pre>POST /loans  (con token)
+{ "bookId": 1, "userId": 1 }
+
+201 Created
+{ "id": 1,
+  "book": { "id": 1, "title": "Clean Code" },
+  "user": { "id": 1, "name": "Ana Librera", "email": "ana@biblioteca.com" },
+  "loanDate": "...", "dueDate": "...", "returnDate": null, "status": "active" }</pre>
+<pre>GET /users/1/loans  -> lista los préstamos del usuario (datos relacionados)
+GET /books/1/loans  -> lista los préstamos del libro (datos relacionados)</pre>
+<pre>DELETE /books/1 con préstamo asociado (RESTRICT) -> 409 Conflict
+{ "message": "No se puede eliminar el libro 1 porque tiene prestamos asociados" }</pre>
+
+<h3>6.5 Filtros, ordenamiento y paginación</h3>
+<pre>GET /books?page=1&amp;limit=2&amp;sortBy=title&amp;order=DESC
+
+200 OK
+{
+  "data": [ { "id": 3, "title": "Libro 3" }, { "id": 2, "title": "Libro 2" } ],
+  "meta": { "page": 1, "limit": 2, "total": 3, "totalPages": 2,
+            "hasNextPage": true, "hasPrevPage": false }
+}</pre>
+<pre>GET /books?category=Novela            -> filtra por categoría
+GET /books?search=clean               -> busca en título, autor e ISBN
+GET /loans?status=active&amp;sortBy=loanDate&amp;order=DESC
+GET /fines?paid=false                 -> multas no pagadas
+GET /books?page=abc                   -> 400 (validación de query params)</pre>
+
+<h2>7. Pruebas automatizadas</h2>
+<pre>npm test    -> 4 suites, 30 pruebas: DTOs, CRUD de libros (409 ISBN y 409 FK),
+               autenticación (login válido/inválido) y paginación.</pre>
+
+</body>
+</html>

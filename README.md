@@ -1,162 +1,289 @@
-# TRABAJO_AUTONOMO_PRIMERA_ETAPA
+# TRABAJO AUTÓNOMO — SEGUNDA ETAPA
 
 API REST de gestión de biblioteca desarrollada con NestJS, PostgreSQL y TypeORM.
 
-**Etapa:** 1 — Fundamentos y definición de la API
+**Etapa:** 2 — Modelo relacional y autenticación
 **Asignatura:** Desarrollo Backend Web con NestJS
 **Docente:** Edgardo Panchana Flores
+**Nivel:** 7 — Semana 7
 
 ---
 
-## 1. Definición del proyecto
+## 1. Continuidad con la Etapa 1
 
-### Problema
+Esta etapa **evoluciona** el mismo proyecto de la Etapa 1. El recurso principal
+`Book` conserva sus campos, sus DTOs de escritura y sus códigos de respuesta. La
+API de libros sigue funcionando; lo único que cambia es:
 
-Las bibliotecas pequeñas y medianAS no cuentan con un sistema centralizado para llevar
-el control de su inventario de libros. Como consecuencia, no se puede saber con
-precisión cuántos ejemplares existen de cada título, qué categorías están disponibles
-ni cuál es la disponibilidad real para el préstamo.
+- `GET /books` ahora es **paginado, filtrable y ordenable** y devuelve
+  `{ data, meta }` en lugar de un arreglo plano (cambio documentado en la
+  sección 4).
+- Los endpoints de **escritura** de libros quedan protegidos con JWT (sección 6).
 
-### Usuarios previstos
-
-| Usuario | Descripción | Etapa |
-|---|---|---|
-| Bibliotecario | Administra el catálogo de libros (alta, edición, baja) | 1 |
-| Lector | Consulta el catálogo y solicita préstamos | 2 (prevista) |
-
-El modelo crece de forma natural hacia **Préstamos**, **Multas** y **Usuarios** en las
-etapas siguientes, sin necesidad de reescribir el recurso ya implementado.
-
-### Recurso principal
-
-`Book` (Libro) — es el recurso que administra la API en esta primera etapa.
-
-| Campo | Tipo | Restricción |
-|---|---|---|
-| id | number | PK, autogenerado |
-| title | string | 1–200 caracteres |
-| author | string | 1–150 caracteres |
-| isbn | string | 10–20 caracteres, único |
-| category | string | 1–100 caracteres |
-| year | number | entero positivo |
-| copies | number | entero, mínimo 0 |
-
-### Diagrama inicial de entidades
-
-```
-+-------------------+
-|      books        |
-+-------------------+
-| id       PK  int  |
-| title       varchar(200) |
-| author      varchar(150) |
-| isbn    UQ  varchar(20)  |
-| category     varchar(100) |
-| year         int    |
-| copies        int    |
-+-------------------+
-
-[ books ] 1 ----< N [ loans ]  (previsto, etapa 2)
-[ users ] 1 ----< N [ loans ]  (previsto, etapa 2)
-```
-
-Para esta etapa el modelo se materializa únicamente en `books`. Las tablas `loans`
-y `users` seCtienen en el diagrama para evidenciar la evolución semestral prevista.
+No se reinició ni sustituyó nada de la etapa anterior.
 
 ---
 
-## 2. Arquitectura NestJS
+## 2. Modelo relacional
 
-La solución está organizada en módulos de negocio. Cada recurso tiene su propio
-módulo, controlador y servicio:
+Además del `Book` existente y de `User`, se agregaron dos entidades de dominio:
+`Loan` (préstamo) y `Fine` (multa).
+
+### Entidades y campos
+
+| Entidad | Tabla | Campos relevantes |
+|---|---|---|
+| `Book` | `books` | id, title, author, isbn (UQ), category, year, copies |
+| `User` | `users` | id, name, email (UQ), password (hash, `select: false`), role, createdAt, updatedAt |
+| `Loan` | `loans` | id, **book_id FK**, **user_id FK**, loanDate, dueDate, returnDate, status |
+| `Fine` | `fines` | id, **loan_id FK**, amount, reason, paid, createdAt |
+
+### Relaciones e integridad referencial
+
+| Relación | Tipo | Regla de borrado | Justificación |
+|---|---|---|---|
+| `User` → `Loan` | OneToMany / ManyToOne | `ON DELETE CASCADE` | Si se elimina un usuario, sus préstamos dejan de tener sentido. |
+| `Book` → `Loan` | OneToMany / ManyToOne | `ON DELETE RESTRICT` | No se debe borrar un libro con historial de préstamos; la API responde `409`. |
+| `Loan` → `Fine` | OneToMany / ManyToOne | `ON DELETE CASCADE` | Una multa no existe sin el préstamo que la origina. |
+
+Los datos relacionados **no se duplican**: un préstamo guarda `book_id` y
+`user_id`, no el título ni el correo. Del mismo modo, una multa guarda `loan_id`.
+
+### Diagrama relacional
+
+```
++------------------+          +-------------------+          +------------------+
+|      users       |          |       loans       |          |      books       |
++------------------+          +-------------------+          +------------------+
+| id       PK      |1        N| id       PK       |N        1| id       PK      |
+| name             |----------| user_id  FK       |----------| title            |
+| email    UQ      |          | book_id  FK       |          | author           |
+| password (hash)  |          | loan_date         |          | isbn     UQ      |
+| role             |          | due_date          |          | category         |
+| created_at       |          | return_date (null)|          | year             |
+| updated_at       |          | status            |          | copies           |
++------------------+          | created_at        |          +------------------+
+                              | updated_at        |
+                              +-------------------+
+                                       |1
+                                       |
+                                       |N
+                              +-------------------+
+                              |       fines       |
+                              +-------------------+
+                              | id       PK       |
+                              | loan_id  FK       |
+                              | amount   numeric  |
+                              | reason            |
+                              | paid              |
+                              | created_at        |
+                              +-------------------+
+```
+
+- `users.id 1 ──< N loans.user_id`  (CASCADE)
+- `books.id 1 ──< N loans.book_id`  (RESTRICT)
+- `loans.id 1 ──< N fines.loan_id`  (CASCADE)
+
+El esquema se crea con una **migración versionada** (sección 5). No se usa
+`synchronize`.
+
+---
+
+## 3. Arquitectura NestJS
 
 ```
 src/
-├── app.module.ts          # ConfigModule + TypeOrmModule + BooksModule
-├── main.ts                # ValidationPipe global (whitelist + forbidNonWhitelisted)
-└── books/
-    ├── books.module.ts    # Registra controlador, servicio y repositorio
-    ├── books.controller.ts# Rutas REST; delega toda la lógica al servicio
-    ├── books.service.ts   # Reglas de negocio, acceso a datos y errores
-    ├── dto/
-    │   ├── create-book.dto.ts
-    │   └── update-book.dto.ts
-    └── entities/
-        └── book.entity.ts # Entidad TypeORM
+├── app.module.ts                 # ConfigModule + TypeORM + módulos de negocio
+├── main.ts                       # ValidationPipe global (whitelist, transform)
+├── common/dto/
+│   └── pagination-query.dto.ts   # page, limit, sortBy, order + metadatos
+├── database/
+│   ├── data-source.ts            # DataSource para el CLI de TypeORM
+│   ├── typeorm.config.ts         # Opciones compartidas (entidades, migrate)
+│   └── migrations/
+│       └── 1791774691127-InitialSchema.ts
+├── auth/
+│   ├── auth.module.ts / auth.service.ts / auth.controller.ts
+│   ├── dto/{register,login}.dto.ts
+│   ├── guards/jwt-auth.guard.ts
+│   ├── strategies/jwt.strategy.ts
+│   └── decorators/current-user.decorator.ts
+├── users/  (entidad, DTOs, servicio, controlador)
+├── books/  (Etapa 1 + paginación + relación con loans)
+├── loans/  (nuevo recurso relacionado)
+└── fines/  (nuevo recurso relacionado)
 ```
 
-**Principio aplicado:** el controlador solo traduce HTTP → servicio. El servicio es
-el único lugar donde se decide si una operación es válida o debe fallar, y es el
-único que accede al repositorio. La inyección de dependencias se usa en ambos
-sentidos: el controlador recibe el servicio por constructor, y el servicio recibe
-`Repository<Book>` mediante `@InjectRepository`.
+**Principio aplicado:** el controlador traduce HTTP → servicio; el servicio
+concentra reglas de negocio, validaciones y acceso a repositorios.
 
 ---
 
-## 3. Endpoints
+## 4. Endpoints
 
-| Método | Ruta            | Descripción                    | Éxito |
-|--------|-----------------|--------------------------------|--------|
-| GET    | `/books`        | Listar todos los libros        | 200    |
-| GET    | `/books/:id`    | Obtener un libro por ID        | 200    |
-| POST   | `/books`        | Crear un libro                 | 201    |
-| PATCH  | `/books/:id`    | Actualizar un libro (parcial)  | 200    |
-| DELETE | `/books/:id`    | Eliminar un libro              | 204    |
+### Públicos
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/auth/register` | Registrar usuario (contraseña cifrada) |
+| POST | `/auth/login` | Iniciar sesión y obtener JWT |
+| GET | `/books` | Listar libros (paginado, filtrable, ordenable) |
+| GET | `/books/:id` | Obtener libro |
+| GET | `/books/:id/loans` | Préstamos de un libro (datos relacionados) |
+| GET | `/loans` | Listar préstamos (paginado, filtrable, ordenable) |
+| GET | `/loans/:id` | Obtener préstamo |
+| GET | `/fines` | Listar multas (paginado, filtrable, ordenable) |
+| GET | `/fines/:id` | Obtener multa |
+
+### Protegidos (requieren `Authorization: Bearer <token>`)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/auth/me` | Datos del usuario autenticado |
+| POST | `/books` | Crear libro |
+| PATCH | `/books/:id` | Actualizar libro |
+| DELETE | `/books/:id` | Eliminar libro |
+| POST | `/loans` | Crear préstamo (asocia book + user) |
+| PATCH | `/loans/:id` | Actualizar préstamo |
+| DELETE | `/loans/:id` | Eliminar préstamo |
+| POST | `/loans/:id/return` | Registrar devolución |
+| POST | `/fines` | Crear multa |
+| PATCH | `/fines/:id` | Actualizar multa |
+| DELETE | `/fines/:id` | Eliminar multa |
+| POST | `/users` | Crear usuario |
+| GET | `/users` | Listar usuarios |
+| GET | `/users/:id` | Obtener usuario |
+| GET | `/users/:id/loans` | Préstamos de un usuario (datos relacionados) |
+| PATCH | `/users/:id` | Actualizar usuario |
+| DELETE | `/users/:id` | Eliminar usuario |
 
 ### Códigos de error
 
 | Código | Cuándo se produce |
-|--------|-------------------|
-| 400 | Payload que no cumple los DTOs, propiedad no permitida, `id` no numérico |
-| 404 | El libro solicitado no existe |
-| 201 | Libro creado correctamente |
-| 204 | Libro eliminado correctamente |
+|---|---|
+| 400 | Payload/query inválido, propiedad no permitida, fecha inválida |
+| 401 | Endpoint protegido sin token o con token inválido/expirado; login incorrecto |
+| 404 | El recurso solicitado no existe |
+| 409 | ISBN o email duplicado; borrar un libro con préstamos asociados |
 
 ---
 
-## 4. Tecnologías
+## 5. Consultas: filtros, ordenamiento y paginación
 
-- [NestJS](https://nestjs.com/)
-- [TypeORM](https://typeorm.io/)
-- [PostgreSQL](https://www.postgresql.org/)
-- [class-validator](https://github.com/typestack/class-validator)
-- [class-transformer](https://github.com/typestack/class-transformer)
-- Git / GitHub
+Todas las colecciones aceptan los mismos parámetros base:
+
+| Param | Descripción | Default |
+|---|---|---|
+| `page` | Número de página (≥ 1) | 1 |
+| `limit` | Resultados por página (1–100) | 10 |
+| `sortBy` | Campo de ordenamiento (lista blanca por recurso) | `id` |
+| `order` | `ASC` o `DESC` | `ASC` |
+
+Cada recurso agrega sus propios filtros:
+
+- `GET /books?search=&category=&year=&minCopies=`
+  - `search` busca en `title`, `author` e `isbn` (ILIKE).
+- `GET /loans?status=&userId=&bookId=`
+- `GET /fines?loanId=&paid=`
+- `GET /users?search=&role=`
+
+La respuesta siempre incluye metadatos:
+
+```json
+{
+  "data": [ { "id": 1, "title": "Clean Code" } ],
+  "meta": {
+    "page": 1,
+    "limit": 10,
+    "total": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPrevPage": false
+  }
+}
+```
+
+Ejemplo:
+
+```bash
+curl "http://localhost:3000/books?search=clean&sortBy=year&order=DESC&page=1&limit=5"
+```
 
 ---
 
-## 5. Requisitos previos
+## 6. Autenticación JWT y rutas protegidas
 
-- Node.js 18 o superior
-- npm
-- PostgreSQL instalado y en ejecución
-- Git
+- Las contraseñas se cifran con **bcrypt** (10 rondas) y la columna se declara
+  `select: false`: nunca se guarda ni se devuelve en texto plano.
+- El login valida credenciales y emite un **JWT** firmado con `JWT_SECRET`.
+- `JwtAuthGuard` protege los endpoints de escritura. Sin token o con token
+  inválido la respuesta es `401`; con token válido la operación continúa.
 
-## 6. Instalación
-
-```bash
-git clone https://github.com/Marjos23/TRABAJO_AUTONOMO_PRIMERA_ETAPA.git
-cd TRABAJO_AUTONOMO_PRIMERA_ETAPA
-npm install
-```
-
-## 7. Configuración
-
-La configuración se lee exclusivamente desde variables de entorno.
-
-1. Crear la base de datos:
-
-```sql
-CREATE DATABASE biblioteca_db;
-```
-
-2. Copiar el archivo de ejemplo y completar los valores:
+Registro:
 
 ```bash
-cp .env.example .env
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Ana Librera","email":"ana@biblioteca.com","password":"Secreta123"}'
 ```
 
-Contenido esperado de `.env`:
+Login:
+
+```bash
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"ana@biblioteca.com","password":"Secreta123"}'
+# -> { "accessToken": "...", "tokenType": "Bearer", "user": { ... } }
+```
+
+Petición sin token (401) y con token (201):
+
+```bash
+# Sin token
+curl -i -X POST http://localhost:3000/books \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Clean Code","author":"Robert C. Martin","isbn":"9780132350884","category":"Tecnologia","year":2008,"copies":5}'
+# HTTP/1.1 401 Unauthorized
+
+# Con token
+TOKEN="<accessToken>"
+curl -i -X POST http://localhost:3000/books \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title":"Clean Code","author":"Robert C. Martin","isbn":"9780132350884","category":"Tecnologia","year":2008,"copies":5}'
+# HTTP/1.1 201 Created
+```
+
+### Credenciales de prueba (no sensibles)
+
+| Email | Contraseña | Rol |
+|---|---|---|
+| `ana@biblioteca.com` | `Secreta123` | reader |
+
+---
+
+## 7. Migraciones y configuración
+
+El esquema se administra con migraciones versionadas. `synchronize` está fijo en
+`false`.
+
+```bash
+# Aplicar la migración inicial
+npm run migration:run
+
+# Ver el estado de las migraciones
+npm run migration:show
+
+# Revertir la última migración
+npm run migration:revert
+
+# Generar una nueva migración a partir de cambios en las entidades
+npm run migration:generate -- src/database/migrations/NombreCambio
+```
+
+### Variables de entorno
+
+Copiar `.env.example` a `.env` y completar:
 
 ```env
 PORT=3000
@@ -165,97 +292,72 @@ DB_PORT=5432
 DB_USER=postgres
 DB_PASSWORD=tu_password
 DB_NAME=biblioteca_db
+DB_SYNCHRONIZE=0
+JWT_SECRET=cambia_esta_clave_por_una_larga_y_aleatoria
+JWT_EXPIRES_IN=1h
 ```
 
-`.env` está en `.gitignore` y **no se versiona**. Solo se publica `.env.example`.
+`.env` está en `.gitignore` y **no se versiona**; solo se publica `.env.example`.
 
-## 8. Ejecución
+---
+
+## 8. Instalación y ejecución
 
 ```bash
-# Desarrollo (recarga automática)
+git clone <URL_DEL_REPOSITORIO>
+cd TRABAJO_AUTONOMO_SEGUNDA_ETAPA
+npm install
+cp .env.example .env      # completar credenciales
+npm run migration:run
 npm run start:dev
-
-# Compilar y ejecutar
-npm run build
-npm run start:prod
 ```
 
-La API queda disponible en `http://localhost:3000`.
+La API queda en `http://localhost:3000`.
 
-> En desarrollo la entidad se crea automáticamente porque TypeORM corre con
-> `synchronize: true`. Para producción deben usarse migraciones.
-
-### Pruebas automatizadas
+### Pruebas
 
 ```bash
-npm test        # pruebas unitarias
-npm run build   # verificacion de compilacion
+npm test           # 30 pruebas unitarias (DTOs, servicios, auth, paginación)
+npm run lint       # ESLint con corrección automática
+npm run lint:check # ESLint sin escribir archivos
+npm run build      # verificación de compilación
 ```
 
-Las pruebas unitarias cubren la validacion de los DTOs (payload invalido, isbn
-corto, anio no numerico, copias negativas, propiedades no permitidas) y el
-comportamiento del servicio (CRUD y centralized de la excepcion 404). No
-requieren base de datos porque el repositorio se simula con un mock.
+Las pruebas unitarias no requieren base de datos: los repositorios se simulan.
+Cubren validación de DTOs, CRUD de libros, conflicto por ISBN, conflicto por
+clave foránea, autenticación (login válido/inválido) y utilidades de paginación.
 
-## 9. Pruebas con curl
+---
 
-Crear un libro:
+## 9. Pruebas con Postman
+
+La carpeta `postman/` incluye la colección `biblioteca-api-etapa2.postman_collection.json`
+con los flujos de registro, login (guarda el token automáticamente), CRUD
+protegido, préstamos, multas, filtros y paginación.
 
 ```bash
-curl -X POST http://localhost:3000/books \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Clean Code","author":"Robert C. Martin","isbn":"9780132350884","category":"Tecnología","year":2008,"copies":5}'
+npx newman run postman/biblioteca-api-etapa2.postman_collection.json
 ```
 
-Listar libros:
+Requiere la API y la base de datos levantadas.
 
-```bash
-curl http://localhost:3000/books
-```
+---
 
-Obtener un libro por ID:
+## 10. Evidencias
 
-```bash
-curl http://localhost:3000/books/1
-```
+En el documento Word de la entrega se adjuntan:
 
-Actualizar parcialmente:
+- Diagrama relacional actualizado.
+- Tabla de endpoints protegidos y prueba autorizado vs no autorizado (`401`).
+- Evidencia de registro con contraseña cifrada, login y emisión de JWT.
+- Evidencia de relación persistente (préstamo que asocia un libro y un usuario).
+- Evidencia de filtros, ordenamiento y paginación con metadatos.
 
-```bash
-curl -X PATCH http://localhost:3000/books/1 \
-  -H "Content-Type: application/json" \
-  -d '{"copies":10}'
-```
+---
 
-Eliminar:
-
-```bash
-curl -X DELETE http://localhost:3000/books/1
-```
-
-Validar el error 400 (propiedad no permitida):
-
-```bash
-curl -X POST http://localhost:3000/books \
-  -H "Content-Type: application/json" \
-  -d '{"title":"X","author":"Y","isbn":"123","category":"Z","year":2020,"copies":1,"campoInvalido":true}'
-```
-
-Validar el error 404:
-
-```bash
-curl http://localhost:3000/books/9999
-```
-
-## 10. Integrantes
+## 11. Integrantes
 
 1. Nombre y Apellido
 2. Nombre y Apellido
 3. Nombre y Apellido
 4. Nombre y Apellido
-
-## 11. Evidencias
-
-Las capturas de las pruebas manuales (CRUD completo, respuesta 400, respuesta 404 y
-persistencia de datos tras reiniciar la API) se adjuntan en el documento Word de la
-entrega.
