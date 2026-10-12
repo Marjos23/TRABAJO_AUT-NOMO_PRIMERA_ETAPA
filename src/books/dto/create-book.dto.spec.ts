@@ -15,7 +15,10 @@ const dtoValido = {
 
 async function validarDto(clase: ClassConstructor<object>, datos: object) {
   const instancia = plainToInstance(clase, datos);
-  return await validate(instancia, { whitelist: true, forbidNonWhitelisted: true });
+  return await validate(instancia, {
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
 }
 
 describe('CreateBookDto', () => {
@@ -25,22 +28,34 @@ describe('CreateBookDto', () => {
   });
 
   it('rechaza el titulo vacio', async () => {
-    const errores = await validarDto(CreateBookDto, { ...dtoValido, title: '' });
+    const errores = await validarDto(CreateBookDto, {
+      ...dtoValido,
+      title: '',
+    });
     expect(errores.length).toBeGreaterThan(0);
   });
 
   it('rechaza un isbn demasiado corto', async () => {
-    const errores = await validarDto(CreateBookDto, { ...dtoValido, isbn: '123' });
+    const errores = await validarDto(CreateBookDto, {
+      ...dtoValido,
+      isbn: '123',
+    });
     expect(errores.length).toBeGreaterThan(0);
   });
 
   it('rechaza anio no numerico', async () => {
-    const errores = await validarDto(CreateBookDto, { ...dtoValido, year: 'dosmil' });
+    const errores = await validarDto(CreateBookDto, {
+      ...dtoValido,
+      year: 'dosmil',
+    });
     expect(errores.length).toBeGreaterThan(0);
   });
 
   it('rechaza copias negativas', async () => {
-    const errores = await validarDto(CreateBookDto, { ...dtoValido, copies: -1 });
+    const errores = await validarDto(CreateBookDto, {
+      ...dtoValido,
+      copies: -1,
+    });
     expect(errores.length).toBeGreaterThan(0);
   });
 

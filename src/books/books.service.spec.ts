@@ -1,6 +1,8 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Test } from '@nestjs/testing';
+import { QueryFailedError } from 'typeorm';
+import { Loan } from '../loans/entities/loan.entity';
 import { BooksService } from './books.service';
 import { Book } from './entities/book.entity';
 
@@ -12,24 +14,46 @@ const libroExistente: Book = {
   category: 'Tecnologia',
   year: 2008,
   copies: 5,
+  loans: [],
 };
+
+function errorDeIsbnDuplicado(): QueryFailedError {
+  return new QueryFailedError('INSERT INTO "books"', [], {
+    code: '23505',
+    message: 'duplicate key value violates unique constraint "UQ_books_isbn"',
+  } as never);
+}
 
 describe('BooksService', () => {
   let service: BooksService;
   let repository: Record<string, jest.Mock>;
+  let queryBuilder: Record<string, jest.Mock>;
 
   beforeEach(async () => {
+    queryBuilder = {
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[libroExistente], 1]),
+    };
+
     repository = {
       create: jest.fn().mockImplementation((dto) => ({ ...dto })),
       save: jest.fn().mockImplementation((libro) => libro),
       find: jest.fn().mockResolvedValue([libroExistente]),
-      findOneBy: jest.fn().mockResolvedValue(libroExistente),
+      findAndCount: jest.fn().mockResolvedValue([[libroExistente], 1]),
+      createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+      findOneBy: jest
+        .fn()
+        .mockImplementation(({ id }) =>
+          id === libroExistente.id ? libroExistente : null,
+        ),
       preload: jest
         .fn()
-        .mockImplementation(({ id, ...cambios }) => ({
-          ...libroExistente,
-          ...cambios,
-        })),
+        .mockImplementation(({ id, ...cambios }) =>
+          id === libroExistente.id ? { ...libroExistente, ...cambios } : null,
+        ),
       remove: jest.fn().mockResolvedValue(libroExistente),
     };
 
@@ -40,6 +64,12 @@ describe('BooksService', () => {
           provide: getRepositoryToken(Book),
           useValue: repository,
         },
+        {
+          provide: getRepositoryToken(Loan),
+          useValue: {
+            findAndCount: jest.fn().mockResolvedValue([[{}], 1]),
+          },
+        },
       ],
     }).compile();
 
@@ -47,10 +77,19 @@ describe('BooksService', () => {
   });
 
   describe('findAll', () => {
-    it('devuelve la coleccion de libros', async () => {
-      const resultado = await service.findAll();
-      expect(resultado).toEqual([libroExistente]);
-      expect(repository.find).toHaveBeenCalled();
+    it('devuelve la coleccion paginada de libros', async () => {
+      const resultado = await service.findAll({});
+      expect(resultado.data).toEqual([libroExistente]);
+      expect(resultado.meta.total).toBe(1);
+      expect(repository.createQueryBuilder).toHaveBeenCalledWith('book');
+    });
+
+    it('aplica el filtro de busqueda cuando se envia', async () => {
+      await service.findAll({ search: 'clean' });
+      expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('ILIKE'),
+        { search: '%clean%' },
+      );
     });
   });
 
@@ -73,6 +112,23 @@ describe('BooksService', () => {
       expect(repository.save).toHaveBeenCalled();
       expect(resultado).toBeDefined();
     });
+
+    it('lanza 409 cuando el isbn ya esta registrado', async () => {
+      repository.save.mockRejectedValue(errorDeIsbnDuplicado());
+
+      await expect(service.create({ ...libroExistente })).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('propaga otros errores de base de datos sin convertir', async () => {
+      const errorInesperado = new Error('conexion perdida');
+      repository.save.mockRejectedValue(errorInesperado);
+
+      await expect(service.create({ ...libroExistente })).rejects.toThrow(
+        errorInesperado,
+      );
+    });
   });
 
   describe('update', () => {
@@ -85,10 +141,18 @@ describe('BooksService', () => {
     });
 
     it('lanza 404 cuando el libro a actualizar no existe', async () => {
-      repository.preload.mockResolvedValue(null);
       await expect(service.update(999, { copies: 10 })).rejects.toThrow(
         NotFoundException,
       );
+      expect(repository.save).not.toHaveBeenCalled();
+    });
+
+    it('lanza 409 cuando el isbn nuevo ya pertenece a otro libro', async () => {
+      repository.save.mockRejectedValue(errorDeIsbnDuplicado());
+
+      await expect(
+        service.update(1, { isbn: '9780132350885' }),
+      ).rejects.toThrow(ConflictException);
     });
   });
 
@@ -101,6 +165,17 @@ describe('BooksService', () => {
     it('lanza 404 cuando el libro a eliminar no existe', async () => {
       repository.findOneBy.mockResolvedValue(null);
       await expect(service.remove(999)).rejects.toThrow(NotFoundException);
+    });
+
+    it('lanza 409 cuando el libro tiene prestamos asociados', async () => {
+      repository.remove.mockRejectedValue(
+        new QueryFailedError('DELETE FROM "books"', [], {
+          code: '23503',
+          message: 'viola la llave foranea',
+        } as never),
+      );
+
+      await expect(service.remove(1)).rejects.toThrow(ConflictException);
     });
   });
 });
