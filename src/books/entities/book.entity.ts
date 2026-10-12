@@ -1,4 +1,5 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import { Loan } from '../../loans/entities/loan.entity';
 
 @Entity('books')
 export class Book {
@@ -22,4 +23,7 @@ export class Book {
 
   @Column({ default: 1 })
   copies: number;
+
+  @OneToMany(() => Loan, (loan) => loan.book)
+  loans: Loan[];
 }

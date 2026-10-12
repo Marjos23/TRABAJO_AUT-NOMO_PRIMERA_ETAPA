@@ -1,8 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthModule } from './auth/auth.module';
 import { BooksModule } from './books/books.module';
-import { Book } from './books/entities/book.entity';
+import { FinesModule } from './fines/fines.module';
+import { LoansModule } from './loans/loans.module';
+import { UsersModule } from './users/users.module';
+import { construirOpcionesTypeOrm } from './database/typeorm.config';
 
 @Module({
   imports: [
@@ -12,18 +16,13 @@ import { Book } from './books/entities/book.entity';
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get<string>('DB_HOST'),
-        port: configService.get<number>('DB_PORT'),
-        username: configService.get<string>('DB_USER'),
-        password: configService.get<string>('DB_PASSWORD'),
-        database: configService.get<string>('DB_NAME'),
-        entities: [Book],
-        synchronize: true,
-      }),
+      useFactory: construirOpcionesTypeOrm,
     }),
+    UsersModule,
+    AuthModule,
     BooksModule,
+    LoansModule,
+    FinesModule,
   ],
 })
 export class AppModule {}
